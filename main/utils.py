@@ -24,12 +24,13 @@ class DataValueSetInterface(object):
     data_elements = []
 
     def __init__(self, dataValueSet, data=None):
-        self.dataValueSet  = dataValueSet
+        self.dataValueSet = dataValueSet
         self.data = data
         self.load_template()
 
     def load_template(self):
-        filename = os.path.abspath(os.path.join(os.path.dirname(__file__),"templates/%s" % self.template_name))
+        filename = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "templates/%s" % self.template_name))
         f = open(filename)
         self.template = Template(f.read())
         f.close()
@@ -39,7 +40,8 @@ class DataValueSetInterface(object):
         if self.data is not None:
             for fe in self.dataValueSet.formdataelement_set.all():
                 if self.data.has_key('%s' % fe.form_field):
-                    element = {'id': fe.data_element.data_element_id, 'value': self.data['%s' % fe.form_field]}
+                    element = {'id': fe.data_element.data_element_id,
+                               'value': self.data['%s' % fe.form_field]}
                     elements.append(element)
         self.data_elements = elements
 
@@ -107,8 +109,10 @@ def get_data_from_formub(dataValueSet, id=None):
 
 
 def send_to_dhis2(xml):
-    auth = base64.encodestring( settings.DHIS2_USERNAME + ':' + settings.DHIS2_PASSWORD )
-    headers = {"Content-Type": "application/xml", 'Authorization' : 'Basic ' + auth}
+    auth = base64.encodestring(settings.DHIS2_USERNAME + ':' +
+                               settings.DHIS2_PASSWORD)
+    headers = {"Content-Type": "application/xml",
+               'Authorization': 'Basic ' + auth}
     http = httplib2.Http()
     http.add_credentials(settings.DHIS2_USERNAME, settings.DHIS2_PASSWORD)
     resp, content = http.request(
@@ -154,7 +158,7 @@ def process_data_queue():
         for dvs in DataValueSet.objects.filter(service=dq.service):
             try:
                 data = get_data_from_formub(dvs, dq.data_id)
-            except Exception, e:
+            except Exception:
                 pass
             else:
                 if data is not None and isinstance(data, list):
