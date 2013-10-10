@@ -1,4 +1,7 @@
 import base64
+import urlparse
+from httmock import HTTMock, urlmatch
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.urlresolvers import reverse
 from django.test import TestCase
@@ -7,7 +10,7 @@ from main import views
 from main.models import DataSet, FormhubService
 
 
-class Main(TestCase):
+class TestBase(TestCase):
     def setUp(self):
         self.username = 'bob'
         self.password = 'bob'
@@ -49,6 +52,8 @@ class Main(TestCase):
         response = self.client.post(self.fh_import_url, post_data)
         self.assertEqual(response.status_code, 200)
 
+
+class Main(TestBase):
     def test_index_page(self):
         response = self.client.get(reverse(views.main))
         self.assertEqual(response.status_code, 200)
@@ -103,3 +108,83 @@ class Main(TestCase):
         response = self.client.get(url,
             **self._set_auth_headers(self.username, self.password))
         self.assertEqual(response.status_code, 200)
+
+
+@urlmatch(netloc=r'^test.formhub$')
+def formhub_oauth_token_mock(url, request):
+    return {
+        'status_code': 200,
+        'content': {
+            "access_token": "Q6dJBs9Vkf7a2lVI7NKLT8F7c6DfLD",
+            "token_type": "Bearer",
+            "expires_in": 36000,
+            "refresh_token": "53yF3uz79K1fif2TPtNBUFJSFhgnpE",
+            "scope": "read write groups"
+        }
+    }
+
+
+class TestFHOAuth(TestBase):
+    def setUp(self):
+        super(TestFHOAuth, self).setUp()
+        self._create_user_and_login()
+
+    def test_redirect_to_token_url(self):
+        url = reverse(views.oauth)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        parsed_url = urlparse.urlparse(response['location'])
+        expected_location = "{0}://{1}{2}".format(
+            parsed_url.scheme, parsed_url.netloc, parsed_url.path)
+        self.assertEqual(expected_location, settings.FH_OAUTH_AUTHORIZE_URL)
+        params = urlparse.parse_qs(parsed_url.query)
+        self.assertIn(settings.FH_OAUTH_CLIENT_ID, params['client_id'])
+        self.assertIn(settings.FH_OAUTH_REDIRECT_URL, params['redirect_uri'])
+
+    def test_token_request(self):
+        """
+        Test when the authorization request is redirected back to our application
+        """
+        url = reverse(views.oauth)
+        with HTTMock(formhub_oauth_token_mock):
+            response = self.client.get(url, {
+                'code': 'ABC123',
+                'state': 'aBC456'
+            })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            urlparse.urlparse(response['location']).path,
+            reverse(views.formhub_import))
+
+    def test_subsequent_token_request(self):
+        """
+        Test subsequent auth token requests are handled gracefully
+        """
+        url = reverse(views.oauth)
+        with HTTMock(formhub_oauth_token_mock):
+            response = self.client.get(url, {
+                'code': 'ABC123',
+                'state': 'aBC456'
+            })
+        with HTTMock(formhub_oauth_token_mock):
+            response = self.client.get(url, {
+                'code': 'ABC123',
+                'state': 'aBC456'
+            })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            urlparse.urlparse(response['location']).path,
+            reverse(views.formhub_import))
+
+    def test_redirect_on_user_cancel_auth(self):
+        """
+        Test that we redirect to the formhub_import view if the user cancels the authorization request
+        """
+        url = reverse(views.oauth)
+        response = self.client.get(url, {
+            'error': 'access_denied'
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            urlparse.urlparse(response['location']).path,
+            reverse(views.formhub_import))

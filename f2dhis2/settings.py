@@ -183,3 +183,10 @@ try:
 except ImportError:
     print("You can override the default settings by adding a "
           "local_settings.py file.")
+
+FH_OAUTH_CLIENT_ID = ""
+FH_OAUTH_CLIENT_SECRET = ""
+FH_OAUTH_AUTHORIZE_URL = "https://formhub.org/o/authorize"
+FH_OAUTH_TOKEN_URL = "https://formhub.org/o/token"
+FH_OAUTH_REDIRECT_URL = "http://f2dhis2.ona.io/oauth"
+FH_OAUTH_VERIFY_SSL = True

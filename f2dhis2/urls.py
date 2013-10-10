@@ -30,6 +30,7 @@ urlpatterns = patterns('',
     url(r'^dvs-elements-form/(?P<dvs_id>[^/]+)$',
         'main.views.get_matchdvsform',
         name='match-de-form'),
+    url(r'^oauth$', 'main.views.oauth'),
 
     # Uncomment the admin/doc line below to enable admin documentation:
     url(r'^admin/doc/', include('django.contrib.admindocs.urls')),

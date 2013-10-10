@@ -1,16 +1,20 @@
 import json
 
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db.utils import IntegrityError
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import render_to_response
 from django.template.context import RequestContext
+from django.shortcuts import redirect
 from django.utils.translation import ugettext as _
+from requests_oauthlib import OAuth2Session
+
 from main.forms import (DataSetImportForm, FormhubImportForm,
                         DataValueSetForm, FHDataElementForm)
 
 from main.models import (FormhubService, DataQueue, DataValueSet, DataElement,
-                         FormDataElement, DataSet)
+                         FormDataElement, DataSet, FormhubOAuthToken)
 from main.tasks import process_dqueue
 from main.utils import process_data_queue, basic_http_auth
 
@@ -158,4 +162,39 @@ def get_matchdvsform(request, dvs_id):
     dvs = DataValueSet.objects.get(pk=dvs_id)
     form.set_fh_fields(dvs.service)
     context.form = form
-    return  render_to_response("dvs-to-elements-form.html", context_instance=context)
+    return render_to_response("dvs-to-elements-form.html",
+                              context_instance=context)
+
+
+@login_required
+def oauth(request):
+    # prepare the url based on the client id
+    session = OAuth2Session(
+        settings.FH_OAUTH_CLIENT_ID,
+        redirect_uri=settings.FH_OAUTH_REDIRECT_URL)
+    session.verify = settings.FH_OAUTH_VERIFY_SSL
+
+    # check if we have both code and state params
+    if 'code' in request.GET and 'state' in request.GET:
+        # todo: check state against cached state from initial auth request
+        token = session.fetch_token(
+            settings.FH_OAUTH_TOKEN_URL, code=request.GET['code'])
+        # store tokens
+        try:
+            stored_token = FormhubOAuthToken.objects.get(user=request.user)
+        except FormhubOAuthToken.DoesNotExist:
+            stored_token = FormhubOAuthToken(user=request.user)
+
+        stored_token.access_token = token['access_token']
+        stored_token.refresh_token = token['refresh_token']
+        stored_token.token_type = token['token_type']
+        stored_token.expires_in = token['expires_in']
+        stored_token.scope = token['scope']
+        stored_token.save()
+        return redirect(formhub_import)
+    elif 'error' in request.GET:
+        return redirect(formhub_import)
+    else:
+        authorization_url, state = session.authorization_url(
+            settings.FH_OAUTH_AUTHORIZE_URL)
+        return HttpResponseRedirect(authorization_url)

@@ -5,3 +5,5 @@ django_extensions
 django-registration
 celery
 django-celery
+requests-oauthlib
+httmock

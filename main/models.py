@@ -1,6 +1,9 @@
+import json
+import datetime
+
 from django.db import models
-from django.utils import simplejson
 from django.utils.translation import ugettext as _
+from django.contrib.auth.models import User
 
 
 class FormhubService(models.Model):
@@ -23,7 +26,7 @@ class FormhubService(models.Model):
         return u"%s (%s)" % (self.name, self.id_string)
 
     def get_form_fields(self):
-        y = simplejson.loads(self.json)
+        y = json.loads(self.json)
         rs = ()
         if y.has_key('children'):
             for v in y['children']:
@@ -39,7 +42,7 @@ class OrganizationUnit(models.Model):
         verbose_name = _(u"Organization Unit")
         verbose_name_plural = _(u"Organization Units")
 
-    org_unit_id = models.CharField(_(u"ID"), max_length=32)#, unique=True)
+    org_unit_id = models.CharField(_(u"ID"), max_length=32, unique=True)
     name = models.CharField(_(u"Name"), max_length=100)
     created_on = models.DateTimeField(_(u"Created on"), auto_now_add=True)
     modified_on = models.DateTimeField(_(u"Modified on"), auto_now=True)
@@ -165,3 +168,25 @@ class DataQueue(models.Model):
 
     def __unicode__(self):
         return u"%s - %s" % (self.service, self.data_id)
+
+
+class FormhubOAuthToken(models.Model):
+    class Meta:
+        app_label = 'main'
+        db_table = 'formhub_oauth_token'
+
+    user = models.OneToOneField(User, primary_key=True)
+    access_token = models.CharField(_(u"Access Token"), max_length=255)
+    refresh_token = models.CharField(_(u"Refresh Token"), max_length=255)
+    token_type = models.CharField(_(u"Token Type"), max_length=32)
+    expires_at = models.DateTimeField(_(u"Expires At"))
+    scope = models.CharField(_(u"Scope"), max_length=255)
+
+    @property
+    def expires_in(self):
+        return (self.expires_at - datetime.datetime.now()).seconds
+
+    @expires_in.setter
+    def expires_in(self, value):
+        self.expires_at = datetime.datetime.now() + datetime.timedelta(
+            seconds=value)
