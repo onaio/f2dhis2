@@ -112,16 +112,30 @@ class Main(TestBase):
 
 @urlmatch(netloc=r'^test.formhub$')
 def formhub_oauth_token_mock(url, request):
-    return {
-        'status_code': 200,
-        'content': {
-            "access_token": "Q6dJBs9Vkf7a2lVI7NKLT8F7c6DfLD",
-            "token_type": "Bearer",
-            "expires_in": 36000,
-            "refresh_token": "53yF3uz79K1fif2TPtNBUFJSFhgnpE",
-            "scope": "read write groups"
+    # only return success if the required params are set
+    valid = True
+    auth = "Basic {}".format(
+        base64.b64encode("{}:{}".format(
+            settings.FH_OAUTH_CLIENT_ID, settings.FH_OAUTH_CLIENT_SECRET)))
+    if request.headers.get('Authorization') != auth:
+        valid = False
+
+    if valid:
+        response = {
+            'status_code': 200,
+            'content': {
+                "access_token": "Q6dJBs9Vkf7a2lVI7NKLT8F7c6DfLD",
+                "token_type": "Bearer",
+                "expires_in": 36000,
+                "refresh_token": "53yF3uz79K1fif2TPtNBUFJSFhgnpE",
+                "scope": "read write groups"
+            }
         }
-    }
+    else:
+        response = {
+            'status_code': 400
+        }
+    return response
 
 
 class TestFHOAuth(TestBase):
@@ -151,6 +165,8 @@ class TestFHOAuth(TestBase):
                 'code': 'ABC123',
                 'state': 'aBC456'
             })
+        self.assertIn(
+            "Your account has been linked.", response.cookies['messages'].value)
         self.assertEqual(response.status_code, 302)
         self.assertEqual(
             urlparse.urlparse(response['location']).path,

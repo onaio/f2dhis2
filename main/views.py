@@ -1,4 +1,5 @@
 import json
+import logging
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
@@ -7,6 +8,7 @@ from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import render_to_response
 from django.template.context import RequestContext
 from django.shortcuts import redirect
+from django.contrib import messages
 from django.utils.translation import ugettext as _
 from requests_oauthlib import OAuth2Session
 
@@ -177,24 +179,41 @@ def oauth(request):
     # check if we have both code and state params
     if 'code' in request.GET and 'state' in request.GET:
         # todo: check state against cached state from initial auth request
-        token = session.fetch_token(
-            settings.FH_OAUTH_TOKEN_URL, code=request.GET['code'])
-        # store tokens
         try:
-            stored_token = FormhubOAuthToken.objects.get(user=request.user)
-        except FormhubOAuthToken.DoesNotExist:
-            stored_token = FormhubOAuthToken(user=request.user)
+            token = session.fetch_token(
+                settings.FH_OAUTH_TOKEN_URL,
+                code=request.GET['code'],
+                auth=(settings.FH_OAUTH_CLIENT_ID,
+                      settings.FH_OAUTH_CLIENT_SECRET))
+        except ValueError as e:
+            messages.error(
+                request,
+                "An unexpected error occurred while attempting to link your "
+                "account")
+            logging.getLogger(__name__).exception(e)
+        else:
+            # store tokens
+            try:
+                stored_token = FormhubOAuthToken.objects.get(user=request.user)
+            except FormhubOAuthToken.DoesNotExist:
+                stored_token = FormhubOAuthToken(user=request.user)
 
-        stored_token.access_token = token['access_token']
-        stored_token.refresh_token = token['refresh_token']
-        stored_token.token_type = token['token_type']
-        stored_token.expires_in = token['expires_in']
-        stored_token.scope = token['scope']
-        stored_token.save()
-        return redirect(formhub_import)
+            stored_token.access_token = token['access_token']
+            stored_token.refresh_token = token['refresh_token']
+            stored_token.token_type = token['token_type']
+            stored_token.expires_in = token['expires_in']
+            stored_token.scope = token['scope']
+            stored_token.save()
+            messages.success(request, "Your account has been linked.")
     elif 'error' in request.GET:
-        return redirect(formhub_import)
+        messages.error(
+            request,
+            "The request to link your account was denied, you will only be "
+            "able to add public forms")
     else:
         authorization_url, state = session.authorization_url(
             settings.FH_OAUTH_AUTHORIZE_URL)
         return HttpResponseRedirect(authorization_url)
+
+    # in all other cases we redirect to formhub_import with different messages
+    return redirect(formhub_import)

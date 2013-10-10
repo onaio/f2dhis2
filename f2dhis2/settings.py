@@ -161,6 +161,11 @@ LOGGING = {
             'handlers': ['mail_admins', 'console'],
             'level': 'ERROR',
             'propagate': True,
+        },
+        'main': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': True,
         }
     }
 }
@@ -177,16 +182,18 @@ DHIS2_DATA_VALUE_SET_URL = "http://apps.dhis2.org/demo/api/dataValueSets"
 DHIS2_USERNAME = "admin"
 DHIS2_PASSWORD = "district"
 
-
-try:
-    from local_settings import *
-except ImportError:
-    print("You can override the default settings by adding a "
-          "local_settings.py file.")
-
 FH_OAUTH_CLIENT_ID = ""
 FH_OAUTH_CLIENT_SECRET = ""
-FH_OAUTH_AUTHORIZE_URL = "https://formhub.org/o/authorize"
-FH_OAUTH_TOKEN_URL = "https://formhub.org/o/token"
-FH_OAUTH_REDIRECT_URL = "http://f2dhis2.ona.io/oauth"
+FH_OAUTH_AUTHORIZE_URL = "https://formhub.org/o/authorize/"
+FH_OAUTH_TOKEN_URL = "https://formhub.org/o/token/"
+FH_OAUTH_REDIRECT_URL = "http://f2dhis2.ona.io/oauth/"
 FH_OAUTH_VERIFY_SSL = True
+
+if os.environ.get('DJANGO_SETTINGS_MODULE') == "f2dhis2.settings":
+    raise ValueError(
+        "You must specify the DJANGO_SETTINGS_MODULE as either dev, "
+        "production or test e.g. \n"
+        "DJANGO_SETTINGS_MODULE=f2dhis2.dev python manage.py <command>")
+else:
+    print "Using {} as settings module".format(
+        os.environ.get('DJANGO_SETTINGS_MODULE'))
