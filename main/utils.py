@@ -1,17 +1,20 @@
 import base64
 import json
+import httplib2
+import os.path
+import urlparse
+import requests
 
 from datetime import datetime
 from functools import wraps
 import urllib
 from django.contrib.auth import authenticate
 from django.http import HttpResponse
-import httplib2
-import os.path
-
 from django.conf import settings
 from django.template.base import Template
 from django.template.context import Context
+from oauthlib.oauth2 import TokenExpiredError
+from requests_oauthlib import OAuth2Session
 
 from main.models import DataValueSet, DataSet, DataQueue
 
@@ -216,4 +219,42 @@ def basic_http_auth(func):
         if result is not None:
             return result
         return func(request, *args, **kwargs)
-    return  inner
+    return inner
+
+
+def get_valid_token(token):
+    pass
+
+
+def make_formhub_request(url, method, params=None, oauth_token=None):
+    if oauth_token:
+        token = oauth_token.to_dict()
+        client = OAuth2Session(settings.FH_OAUTH_CLIENT_ID, token=token)
+        try:
+            response = client.request(method, url, params)
+        except TokenExpiredError as e:
+            token = client.refresh_token(
+                fh_oauth_token_url(),
+                auth=(settings.FH_OAUTH_CLIENT_ID,
+                      settings.FH_OAUTH_CLIENT_SECRET))
+            oauth_token.from_dict(token)
+            oauth_token.save()
+            response = client.request(method, url, params)
+    else:
+        response = requests.request(method, url, params=params)
+    return response
+
+
+def fh_oauth_authorize_url():
+    return urlparse.urljoin(
+        settings.FH_SERVER_URL, settings.FH_OAUTH_AUTHORIZE_PATH)
+
+
+def fh_oauth_token_url():
+    return urlparse.urljoin(
+        settings.FH_SERVER_URL, settings.FH_OAUTH_TOKEN_PATH)
+
+
+def fh_test_form_path():
+    return urlparse.urljoin(
+        settings.FH_SERVER_URL, settings.FH_TEST_FORM_PATH)

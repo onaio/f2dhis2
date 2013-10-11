@@ -1,5 +1,7 @@
 import base64
 import urlparse
+import requests
+
 from httmock import HTTMock, urlmatch
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -7,7 +9,10 @@ from django.core.urlresolvers import reverse
 from django.test import TestCase
 from django.test.client import Client
 from main import views
-from main.models import DataSet, FormhubService
+from main.models import DataSet, FormhubService, FormhubOAuthToken
+from main.utils import (get_valid_token, make_formhub_request,
+                        fh_oauth_authorize_url, fh_oauth_token_url,
+                        fh_test_form_path)
 
 
 class TestBase(TestCase):
@@ -110,7 +115,7 @@ class Main(TestBase):
         self.assertEqual(response.status_code, 200)
 
 
-@urlmatch(netloc=r'^test.formhub$')
+@urlmatch(netloc=r'^test.formhub$', path='/o/token/')
 def formhub_oauth_token_mock(url, request):
     # only return success if the required params are set
     valid = True
@@ -133,8 +138,53 @@ def formhub_oauth_token_mock(url, request):
         }
     else:
         response = {
-            'status_code': 400
+            'status_code': 401,
+            'content': {}
         }
+    return response
+
+
+@urlmatch(netloc=r'^test.formhub$',
+          path='/api/v1/forms/larryweya/714/form.json')
+def formhub_form_mock(url, request):
+    # only return success if the required params are set
+    valid = True
+
+    if 'Authorization' in request.headers and "Bearer" not in\
+            request.headers.get('Authorization'):
+        valid = False
+
+    if valid:
+        response = {
+            'status_code': 200,
+            'content': {
+                "default_language": "default",
+                "id_string": "good_eats",
+                "children": [
+                    {
+                        "name": "submit_data",
+                        "type": "today"
+                    }
+                ]
+            }
+        }
+    else:
+        response = {
+            'status_code': 403
+        }
+    return response
+
+
+@urlmatch(netloc=r'^test.formhub$', path='/o/authorize/')
+def formhub_oauth_authorize_mock(url, request):
+    response = {
+        'status_code': 302,
+        'headers': {
+            'Location': "{0}?state=pDrle4isHK1oGLOsVMTMHvzHu5lglq"
+                        "&code=jkHxxuM9kvI5dqozYpxNufD9lHhpd8".format(
+                settings.FH_OAUTH_REDIRECT_URL)
+        }
+    }
     return response
 
 
@@ -143,6 +193,15 @@ class TestFHOAuth(TestBase):
         super(TestFHOAuth, self).setUp()
         self._create_user_and_login()
 
+    def _get_auth_token(self):
+        url = reverse(views.oauth)
+        fh_authorize_url = self.client.get(url)['location']
+        with HTTMock(formhub_oauth_authorize_mock):
+            response = requests.get(fh_authorize_url)
+        params = urlparse.parse_qs(
+            urlparse.urlparse(response.headers['Location']).query)
+        return params['state'][0], params['code'][0]
+
     def test_redirect_to_token_url(self):
         url = reverse(views.oauth)
         response = self.client.get(url)
@@ -150,7 +209,7 @@ class TestFHOAuth(TestBase):
         parsed_url = urlparse.urlparse(response['location'])
         expected_location = "{0}://{1}{2}".format(
             parsed_url.scheme, parsed_url.netloc, parsed_url.path)
-        self.assertEqual(expected_location, settings.FH_OAUTH_AUTHORIZE_URL)
+        self.assertEqual(expected_location, fh_oauth_authorize_url())
         params = urlparse.parse_qs(parsed_url.query)
         self.assertIn(settings.FH_OAUTH_CLIENT_ID, params['client_id'])
         self.assertIn(settings.FH_OAUTH_REDIRECT_URL, params['redirect_uri'])
@@ -159,11 +218,12 @@ class TestFHOAuth(TestBase):
         """
         Test when the authorization request is redirected back to our application
         """
+        state, code = self._get_auth_token()
         url = reverse(views.oauth)
         with HTTMock(formhub_oauth_token_mock):
             response = self.client.get(url, {
-                'code': 'ABC123',
-                'state': 'aBC456'
+                'state': state,
+                'code': code
             })
         self.assertIn(
             "Your account has been linked.", response.cookies['messages'].value)
@@ -176,16 +236,17 @@ class TestFHOAuth(TestBase):
         """
         Test subsequent auth token requests are handled gracefully
         """
+        state, code = self._get_auth_token()
         url = reverse(views.oauth)
         with HTTMock(formhub_oauth_token_mock):
             response = self.client.get(url, {
-                'code': 'ABC123',
-                'state': 'aBC456'
+                'state': state,
+                'code': code
             })
         with HTTMock(formhub_oauth_token_mock):
             response = self.client.get(url, {
-                'code': 'ABC123',
-                'state': 'aBC456'
+                'state': state,
+                'code': code
             })
         self.assertEqual(response.status_code, 302)
         self.assertEqual(
@@ -204,3 +265,41 @@ class TestFHOAuth(TestBase):
         self.assertEqual(
             urlparse.urlparse(response['location']).path,
             reverse(views.formhub_import))
+
+    def test_make_formhub_request_without_token(self):
+        url = fh_test_form_path()
+        method = 'GET'
+
+        with HTTMock(formhub_form_mock):
+            response = make_formhub_request(url, method)
+        self.assertEqual(response.status_code, 200)
+
+    def test_make_formhub_request_with_valid_token(self):
+        token = FormhubOAuthToken(user=self.user)
+        token.access_token = 'aBCDe'
+        token.refresh_token = '1234'
+        token.token_type = 'Bearer'
+        token.expires_in = 36000
+        token.scope = "['read', 'write']"
+
+        url = fh_test_form_path()
+        method = 'GET'
+
+        with HTTMock(formhub_form_mock, formhub_oauth_token_mock):
+            response = make_formhub_request(url, method, None, token)
+        self.assertEqual(response.status_code, 200)
+
+    def test_make_formhub_request_with_expired_token(self):
+        token = FormhubOAuthToken(user=self.user)
+        token.access_token = 'aBCDe'
+        token.refresh_token = '1234'
+        token.token_type = 'Bearer'
+        token.expires_in = -1800
+        token.scope = "['read', 'write']"
+
+        url = fh_test_form_path()
+        method = 'GET'
+
+        with HTTMock(formhub_form_mock, formhub_oauth_token_mock):
+            response = make_formhub_request(url, method, None, token)
+        self.assertEqual(response.status_code, 200)
