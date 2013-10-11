@@ -171,6 +171,7 @@ class DataQueue(models.Model):
 
 
 class FormhubOAuthToken(models.Model):
+
     class Meta:
         app_label = 'main'
         db_table = 'formhub_oauth_token'
@@ -184,9 +185,31 @@ class FormhubOAuthToken(models.Model):
 
     @property
     def expires_in(self):
-        return (self.expires_at - datetime.datetime.now()).seconds
+        td = (self.expires_at - datetime.datetime.now())
+        return (td.microseconds + (
+            td.seconds + td.days * 24 * 3600) * 10**6) / 10.0**6
 
     @expires_in.setter
     def expires_in(self, value):
         self.expires_at = datetime.datetime.now() + datetime.timedelta(
             seconds=value)
+
+    @property
+    def is_valid(self):
+        # we should have atleast 30 mins left
+        return self.expires_in > 1800
+
+    def to_dict(self):
+        return {
+            'access_token': self.access_token,
+            'refresh_token': self.refresh_token,
+            'token_type': self.token_type,
+            'expires_in': self.expires_in
+        }
+
+    def from_dict(self, token):
+        self.access_token = token['access_token']
+        self.refresh_token = token['refresh_token']
+        self.token_type = token['token_type']
+        self.expires_in = token['expires_in']
+        self.scope = token['scope']
