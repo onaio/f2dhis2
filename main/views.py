@@ -18,7 +18,8 @@ from main.forms import (DataSetImportForm, FormhubImportForm,
 from main.models import (FormhubService, DataQueue, DataValueSet, DataElement,
                          FormDataElement, DataSet, FormhubOAuthToken)
 from main.tasks import process_dqueue
-from main.utils import process_data_queue, basic_http_auth
+from main.utils import (process_data_queue, basic_http_auth,
+                        fh_oauth_authorize_url, fh_oauth_token_url)
 
 
 def main(request):
@@ -76,7 +77,7 @@ def formhub_import(request):
     if request.method == 'POST':
         form = FormhubImportForm(request.POST)
         try:
-            fhs = form.fh_import()
+            fhs = form.fh_import(request.user)
         except IntegrityError, e:
             context.message = _(u"Form has already been uploaded.")
         else:
@@ -85,13 +86,13 @@ def formhub_import(request):
             else:
                 context.message = _(u"Failed to import from formhub.")
     context.fhforms = FormhubService.objects.all()
-    return  render_to_response("formhub-import.html", context_instance=context)
+    return render_to_response("formhub-import.html", context_instance=context)
 
 
 def show_formhub_forms(request):
     context = RequestContext(request)
     context.fhforms = FormhubService.objects.all()
-    return  render_to_response("formhub-import.html", context_instance=context)
+    return render_to_response("formhub-import.html", context_instance=context)
 
 
 @login_required
@@ -181,7 +182,7 @@ def oauth(request):
         # todo: check state against cached state from initial auth request
         try:
             token = session.fetch_token(
-                settings.FH_OAUTH_TOKEN_URL,
+                fh_oauth_token_url(),
                 code=request.GET['code'],
                 auth=(settings.FH_OAUTH_CLIENT_ID,
                       settings.FH_OAUTH_CLIENT_SECRET))
@@ -212,7 +213,7 @@ def oauth(request):
             "able to add public forms")
     else:
         authorization_url, state = session.authorization_url(
-            settings.FH_OAUTH_AUTHORIZE_URL)
+            fh_oauth_authorize_url())
         return HttpResponseRedirect(authorization_url)
 
     # in all other cases we redirect to formhub_import with different messages

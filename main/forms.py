@@ -1,11 +1,15 @@
+import logging
 import json
+
 from django import forms
 from django.db.utils import IntegrityError
 from django.forms.models import ModelForm
 from django.utils.translation import ugettext as _
 
-from main.models import DataSet, DataElement, FormhubService, OrganizationUnit, DataValueSet
-from main.utils import load_from_dhis2, load_form_from_formhub
+from main.models import (DataSet, DataElement, FormhubService,
+                         OrganizationUnit, DataValueSet, FormhubOAuthToken)
+from main.utils import (load_from_dhis2, load_form_from_formhub,
+                        get_valid_token, make_formhub_request)
 
 
 class DataSetImportForm(forms.Form):
@@ -36,13 +40,12 @@ class DataSetImportForm(forms.Form):
                             _(u"%(dataset)s has already been added." %\
                               {'dataset': data['name']})}
                 for de in data['dataElements']:
-                    element = DataElement(data_element_id=de['id'],
-                        name=de['name'],
-                        data_set=ds)
+                    element = DataElement(
+                        data_element_id=de['id'], name=de['name'], data_set=ds)
                     element.save()
                 for orgunit in data['organisationUnits']:
-                    org, created = OrganizationUnit.objects.get_or_create(org_unit_id=orgunit['id'],
-                        name=orgunit['name'])
+                    org, created = OrganizationUnit.objects.get_or_create(
+                        org_unit_id=orgunit['id'], name=orgunit['name'])
                     #org.save()
                     ds.organizations.add(org)
                 summary['dataSet'] = ds
@@ -56,18 +59,33 @@ class DataSetImportForm(forms.Form):
 class FormhubImportForm(forms.Form):
     formhub_url = forms.URLField(label=_(u"Formhub Form URL"), required=True)
 
-    def fh_import(self):
+    def fh_import(self, user):
         if self.is_valid():
+            # check if we have a valid oauth2 token
+            try:
+                token = FormhubOAuthToken.objects.get(user=user)
+            except FormhubOAuthToken.DoesNotExist:
+                token = None
+                logging.getLogger(__name__).debug(
+                    "User: {} does not have an oauth2 token".format(
+                        user.username))
+
             cleaned_url = self.cleaned_data['formhub_url']
             if not cleaned_url.endswith('/form.json'):
                 cleaned_url += '/form.json'
-            form_data = load_form_from_formhub(cleaned_url)
-            if isinstance(form_data, dict):
-                fhs = FormhubService(url=cleaned_url,
-                    id_string=form_data['id_string'],
-                    name=form_data['name'], json=json.dumps(form_data))
-                fhs.save()
-                return fhs
+            response = make_formhub_request(
+                cleaned_url, 'GET', None, token)
+            if response.status_code == 200:
+                form_data = json.loads(response.content)
+                if isinstance(form_data, dict):
+                    fhs = FormhubService(
+                        url=cleaned_url,
+                        id_string=form_data['id_string'],
+                        name=form_data['name'],
+                        json=json.dumps(form_data))
+                    fhs.save()
+                    return fhs
+            # raise or log something
         return False
 
 

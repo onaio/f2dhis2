@@ -6,4 +6,4 @@ django-registration
 celery
 django-celery
 requests-oauthlib
-httmock
+-e git+https://github.com/modilabs/httmock.git#egg=httmock

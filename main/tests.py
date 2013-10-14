@@ -11,8 +11,38 @@ from django.test.client import Client
 from main import views
 from main.models import DataSet, FormhubService, FormhubOAuthToken
 from main.utils import (get_valid_token, make_formhub_request,
-                        fh_oauth_authorize_url, fh_oauth_token_url,
-                        fh_test_form_path)
+                        fh_oauth_authorize_url, fh_oauth_token_url)
+
+
+def fh_test_form_path():
+    return urlparse.urljoin(
+        settings.FH_SERVER_URL, '/api/v1/forms/larryweya/17621/form.json')
+
+
+@urlmatch(netloc=r'^test.formhub$', path='/larryweya/forms/tutorial/form.json')
+def formhub_legacy_form_mock(url, request):
+    if url.path == '/larryweya/forms/tutorial/form.json':
+        response = {
+            'status_code': 200,
+            'content': {
+                "default_language": "default",
+                "id_string": "good_eats",
+                "name": "good_eats",
+                "title": "Good Eats",
+                "type": "survey",
+                "children": [
+                    {
+                        "name": "submit_data",
+                        "type": "today"
+                    }
+                ]
+            }
+        }
+    else:
+        response = {
+            'status_code': 403
+        }
+    return response
 
 
 class TestBase(TestCase):
@@ -22,7 +52,10 @@ class TestBase(TestCase):
         self.client = Client()
         self.base_url = 'http://testserver'
         self.ds_url = u'http://apps.dhis2.org/demo/api/dataSets/pBOMPrpg1QX'
-        self.fh_url = u"http://formhub.org/ukanga/forms/dhis2form"
+        self.fh_url = urlparse.urljoin(
+            settings.FH_SERVER_URL, '/larryweya/forms/tutorial')
+        self.fh_api_form_url = urlparse.urljoin(
+            settings.FH_SERVER_URL, '/api/v1/forms/larryweya/17621')
         self.ds_import_url = reverse(views.dataset_import)
         self.fh_import_url = reverse(views.formhub_import)
 
@@ -43,17 +76,16 @@ class TestBase(TestCase):
 
     def _set_auth_headers(self, username, password):
         return {
-            'HTTP_AUTHORIZATION': 'Basic ' + base64.b64encode('%s:%s' \
-                % (username, password)),
-            }
+            'HTTP_AUTHORIZATION': 'Basic ' + base64.b64encode(
+                '%s:%s' % (username, password))}
 
     def _import_dataset(self):
         post_data = {'data_set_url': self.ds_url}
         response = self.client.post(self.ds_import_url, post_data)
         self.assertEqual(response.status_code, 200)
 
-    def _import_formhub_form(self):
-        post_data = {'formhub_url': self.fh_url}
+    def _import_formhub_form(self, url):
+        post_data = {'formhub_url': url}
         response = self.client.post(self.fh_import_url, post_data)
         self.assertEqual(response.status_code, 200)
 
@@ -87,8 +119,22 @@ class Main(TestBase):
         self.assertEqual(response.status_code, 200)
         # check saved Formhub service
         count = FormhubService.objects.count()
-        self.assertEqual(count, 0)
-        self._import_formhub_form()
+        with HTTMock(formhub_legacy_form_mock):
+            self._import_formhub_form(url=self.fh_url)
+        self.assertEqual(FormhubService.objects.count(), count + 1)
+
+    def test_import_formhub_form_with_oauth(self):
+        response = self.client.get(self.ds_import_url)
+        # need to login first, should redirect
+        self.assertEqual(response.status_code, 401)
+        self._create_user_and_login()
+        # should be successful this time
+        response = self.client.get(self.fh_import_url)
+        self.assertEqual(response.status_code, 200)
+        # check saved Formhub service
+        count = FormhubService.objects.count()
+        with HTTMock(formhub_api_form_mock):
+            self._import_formhub_form(url=self.fh_api_form_url)
         self.assertEqual(FormhubService.objects.count(), count + 1)
 
     def test_show_datasets(self):
@@ -106,12 +152,12 @@ class Main(TestBase):
         self.assertEqual(response.status_code, 401)
         self._create_user(self.username, self.password)
         # pass in Basic HTTP Authentication headers, invalid user/pass
-        response = self.client.get(url,
-            **self._set_auth_headers('dummy', 'nonexistent'))
+        response = self.client.get(
+            url, **self._set_auth_headers('dummy', 'nonexistent'))
         self.assertEqual(response.status_code, 401)
         # pass in Basic HTTP Authentication headers, correct user/pass
-        response = self.client.get(url,
-            **self._set_auth_headers(self.username, self.password))
+        response = self.client.get(
+            url, **self._set_auth_headers(self.username, self.password))
         self.assertEqual(response.status_code, 200)
 
 
@@ -145,8 +191,8 @@ def formhub_oauth_token_mock(url, request):
 
 
 @urlmatch(netloc=r'^test.formhub$',
-          path='/api/v1/forms/larryweya/714/form.json')
-def formhub_form_mock(url, request):
+          path='/api/v1/forms/larryweya/17621/form.json')
+def formhub_api_form_mock(url, request):
     # only return success if the required params are set
     valid = True
 
@@ -160,6 +206,9 @@ def formhub_form_mock(url, request):
             'content': {
                 "default_language": "default",
                 "id_string": "good_eats",
+                "name": "good_eats",
+                "title": "Good Eats",
+                "type": "survey",
                 "children": [
                     {
                         "name": "submit_data",
@@ -270,7 +319,7 @@ class TestFHOAuth(TestBase):
         url = fh_test_form_path()
         method = 'GET'
 
-        with HTTMock(formhub_form_mock):
+        with HTTMock(formhub_api_form_mock):
             response = make_formhub_request(url, method)
         self.assertEqual(response.status_code, 200)
 
@@ -285,7 +334,7 @@ class TestFHOAuth(TestBase):
         url = fh_test_form_path()
         method = 'GET'
 
-        with HTTMock(formhub_form_mock, formhub_oauth_token_mock):
+        with HTTMock(formhub_api_form_mock, formhub_oauth_token_mock):
             response = make_formhub_request(url, method, None, token)
         self.assertEqual(response.status_code, 200)
 
@@ -300,6 +349,6 @@ class TestFHOAuth(TestBase):
         url = fh_test_form_path()
         method = 'GET'
 
-        with HTTMock(formhub_form_mock, formhub_oauth_token_mock):
+        with HTTMock(formhub_api_form_mock, formhub_oauth_token_mock):
             response = make_formhub_request(url, method, None, token)
         self.assertEqual(response.status_code, 200)

@@ -1,4 +1,6 @@
 import os
+import sys
+import subprocess
 import logging
 
 from django.utils.log import AdminEmailHandler
@@ -184,10 +186,32 @@ DHIS2_PASSWORD = "district"
 
 FH_OAUTH_CLIENT_ID = ""
 FH_OAUTH_CLIENT_SECRET = ""
-FH_OAUTH_AUTHORIZE_URL = "https://formhub.org/o/authorize/"
-FH_OAUTH_TOKEN_URL = "https://formhub.org/o/token/"
-FH_OAUTH_REDIRECT_URL = "http://f2dhis2.ona.io/oauth/"
+
+FH_SERVER_URL = "https://formhub.org"
+FH_OAUTH_AUTHORIZE_PATH = "/o/authorize/"
+FH_OAUTH_TOKEN_PATH = "/o/token/"
+FH_OAUTH_REDIRECT_URL = "http://f2dhis2.ona.io/oauth"
 FH_OAUTH_VERIFY_SSL = True
+
+# explicitly set test db to avoid mishaps if tests are run on production
+TESTING_MODE = False
+if len(sys.argv) >= 2 and (sys.argv[1] == "test" or sys.argv[1] == "test_all"):
+    # This trick works only when we run tests from the command line.
+    TESTING_MODE = True
+else:
+    TESTING_MODE = False
+
+if TESTING_MODE:
+    MEDIA_ROOT = os.path.join(PROJECT_ROOT, 'test_media/')
+    subprocess.call(["rm", "-r", MEDIA_ROOT])
+    # need to have CELERY_ALWAYS_EAGER True and BROKER_BACKEND as memory
+    # to run tasks immediately while testing
+    CELERY_ALWAYS_EAGER = True
+    BROKER_BACKEND = 'memory'
+    DATABASE_NAME = 'f2dhis2_test'
+else:
+    MEDIA_ROOT = os.path.join(PROJECT_ROOT, 'media/')
+    DATABASE_NAME = 'f2dhis2'
 
 if os.environ.get('DJANGO_SETTINGS_MODULE') == "f2dhis2.settings":
     raise ValueError(

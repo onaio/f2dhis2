@@ -129,7 +129,7 @@ def load_from_dhis2(url):
     """
     auth = base64.encodestring(
         settings.DHIS2_USERNAME + ':' + settings.DHIS2_PASSWORD)
-    headers = {'Authorization' : 'Basic ' + auth}
+    headers = {'Authorization': 'Basic ' + auth}
     http = httplib2.Http()
     http.add_credentials(settings.DHIS2_USERNAME, settings.DHIS2_PASSWORD)
     resp, content = http.request(url, headers=headers)
@@ -231,7 +231,8 @@ def make_formhub_request(url, method, params=None, oauth_token=None):
         token = oauth_token.to_dict()
         client = OAuth2Session(settings.FH_OAUTH_CLIENT_ID, token=token)
         try:
-            response = client.request(method, url, params)
+            response = client.request(
+                method, url, params, verify=settings.FH_OAUTH_VERIFY_SSL)
         except TokenExpiredError as e:
             token = client.refresh_token(
                 fh_oauth_token_url(),
@@ -253,8 +254,3 @@ def fh_oauth_authorize_url():
 def fh_oauth_token_url():
     return urlparse.urljoin(
         settings.FH_SERVER_URL, settings.FH_OAUTH_TOKEN_PATH)
-
-
-def fh_test_form_path():
-    return urlparse.urljoin(
-        settings.FH_SERVER_URL, settings.FH_TEST_FORM_PATH)

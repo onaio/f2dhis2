@@ -2,6 +2,9 @@
 {% load i18n %}
 
 {% block content %}
+
+    <p class="lead"><a href="{% url 'main.views.oauth' %}">Link your formhub account</a> to have access to your private forms</p>
+
 {% if form %}
 <form action="{% url 'fh-import' %}" method="post" enctype="multipart/form-data">
     {% csrf_token %}
